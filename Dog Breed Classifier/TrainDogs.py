@@ -23,6 +23,11 @@ GCP_PROJECT = 'fastai'
  
 NUM_CLASSES = metadata.features['label'].num_classes
 
+#The test set is pretty large, we merge some of it into the train set
+ds_test = ds_test.shuffle(tf.data.experimental.cardinality(ds_test), reshuffle_each_iteration=False)
+ds_train = ds_train.concatenate(ds_test.take(4000))
+ds_test = ds_test.skip(4000)
+
 
 IMG_SIZE = 224
 BATCH_SIZE = 64
