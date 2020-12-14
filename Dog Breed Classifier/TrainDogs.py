@@ -28,62 +28,93 @@ ds_test = ds_test.shuffle(tf.data.experimental.cardinality(ds_test), reshuffle_e
 ds_train = ds_train.concatenate(ds_test.take(4000))
 ds_test = ds_test.skip(4000)
 
+#NUM_TRAINING = tf.data.experimental.cardinality(ds_train)
+#NUM_TEST = tf.data.experimental.cardinality(ds_test)
+
+
 
 IMG_SIZE = 224
 BATCH_SIZE = 64
-BUFFER_SIZE = 2
+AUTOTUNE = tf.data.experimental.AUTOTUNE
  
 size = (IMG_SIZE, IMG_SIZE)
 ds_train = ds_train.map(lambda image, label: (tf.image.resize(image, size), label))
 ds_test = ds_test.map(lambda image, label: (tf.image.resize(image, size), label))
- 
-def input_preprocess(image, label):
-    image = tf.keras.applications.resnet50.preprocess_input(image)
+
+
+def preprocess(image, label):
+    label = tf.one_hot(tf.cast(label, tf.int32), NUM_CLASSES)
+    label = tf.cast(label, tf.float32)
+    image = tf.image.convert_image_dtype(image, tf.float32)
+    
     return image, label
 
-ds_train = ds_train.map(
-    input_preprocess, num_parallel_calls=tf.data.experimental.AUTOTUNE
-)
+def augment(image, label):
+    image = tf.image.random_flip_left_right(image)
+    image = tf.image.random_brightness(image, max_delta=32. / 255.)
+    image = tf.image.random_saturation(image, lower=0.5, upper=1.5)
+    image = tf.keras.applications.resnet50.preprocess_input(image)
+    
+    return image, label
+    
+
+
+train = (ds_train
+         .map(preprocess, num_parallel_calls=AUTOTUNE)
+         .map(augment, num_parallel_calls=AUTOTUNE)
+         .shuffle(100)
+         .batch(64, drop_remainder=True)
+         .prefetch(AUTOTUNE)
+         .repeat()
+        )
  
-ds_train = ds_train.batch(batch_size=BATCH_SIZE, drop_remainder=True)
-ds_train = ds_train.prefetch(tf.data.experimental.AUTOTUNE)
- 
-ds_test = ds_test.map(input_preprocess)
-ds_test = ds_test.batch(batch_size=BATCH_SIZE, drop_remainder=True)
-
-inputs = tf.keras.layers.Input(shape=(IMG_SIZE, IMG_SIZE, 3))
-base_model = tf.keras.applications.ResNet50(
-    weights="imagenet", include_top=False, input_tensor=inputs
-)
-x = tf.keras.layers.GlobalAveragePooling2D()(base_model.output)
-x = tf.keras.layers.Dropout(0.5)(x)
-outputs = tf.keras.layers.Dense(NUM_CLASSES)(x)
- 
-model = tf.keras.Model(inputs, outputs)
-
-base_model.trainable = False
+val = (ds_test
+       .map(preprocess, num_parallel_calls=AUTOTUNE)
+       .cache()
+       .batch(64, drop_remainder=True)
+      )
 
 
-MODEL_PATH = "resnet-dogs"
-checkpoint_path = os.path.join("gs://", GCP_BUCKET, MODEL_PATH, "save_at_{epoch}")
+base_model = tf.keras.applications.ResNet50(weights='imagenet', include_top=False)
+
+for layer in base_model.layers:
+    layer.trainable = False
+#for layer in base_model.layers[-10:]:
+#    layer.trainable = True
+
+model = keras.Sequential([
+        keras.Input(shape=(IMG_SIZE, IMG_SIZE, 3)),
+        base_model,
+        keras.layers.GlobalAveragePooling2D(),
+        keras.layers.Dropout(0.5),
+        keras.layers.Flatten(),
+        keras.layers.Dense(NUM_CLASSES, activation='softmax')
+    ])
+
+
+
+MODEL_PATH = 'resnet-dogs'
+checkpoint_path = os.path.join('gs://', GCP_BUCKET, MODEL_PATH, 'save_at_{epoch}')
 tensorboard_path = os.path.join(
-    "gs://", GCP_BUCKET, "logs", datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    'gs://', GCP_BUCKET, 'logs', datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
 )
 
 callbacks = [
-    # TensorBoard will store logs for each epoch and graph performance for us. 
     keras.callbacks.TensorBoard(log_dir=tensorboard_path, histogram_freq=1),
-    # ModelCheckpoint will save models after each epoch for retrieval later.
     keras.callbacks.ModelCheckpoint(checkpoint_path),
-    # EarlyStopping will terminate training when val_loss ceases to improve. 
-    keras.callbacks.EarlyStopping(monitor="val_loss", patience=3),
+    keras.callbacks.EarlyStopping(monitor='val_loss', patience=3),
 ]
 
 model.compile(
     optimizer=tf.keras.optimizers.Adam(learning_rate=1e-2),
-    loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True),
-    metrics=["accuracy"],
+    loss='categorical_crossentropy',
+    metrics=['accuracy'],
 )
 
-model.fit(
-    ds_train, epochs=1, callbacks=callbacks, validation_data=ds_test, verbose=2)
+model.fit(train, 
+          epochs=5, 
+          callbacks=callbacks, 
+          validation_data=val, 
+          #steps_per_epoch=NUM_TRAINING//BATCH_SIZE,
+          #validation_steps=NUM_TEST//BATCH_SIZE
+         )
