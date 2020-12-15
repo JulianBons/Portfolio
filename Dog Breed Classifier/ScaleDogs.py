@@ -6,8 +6,8 @@ job_labels = {'job': 'dog_breeds'}
 
 tfc.run(
     entry_point='TrainDogs.py',
-    requirements_txt="requirements.txt",
-    distribution_strategy="auto",
+    requirements_txt='requirements.txt',
+    distribution_strategy='auto',
     chief_config=tfc.MachineConfig(
         cpu_cores=4,
         memory=15,
