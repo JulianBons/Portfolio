@@ -97,14 +97,18 @@ callbacks = [
     keras.callbacks.EarlyStopping(monitor='val_loss', patience=3),
 ]
 
+lr_schedule = keras.optimizers.schedules.ExponentialDecay(
+    0.01, decay_steps=20, decay_rate=0.96, staircase=True
+)
+
 model.compile(
-    optimizer=tf.keras.optimizers.Adam(learning_rate=1e-2),
+    optimizer=tf.keras.optimizers.Adam(learning_rate=lr_schedule),
     loss='categorical_crossentropy',
     metrics=['accuracy'],
 )
 
 model.fit(train, 
-          epochs=5, 
+          epochs=20, 
           callbacks=callbacks, 
           validation_data=val, 
           steps_per_epoch=NUM_TRAINING//BATCH_SIZE,
