@@ -10,10 +10,9 @@ def preprocess(image, label):
     
     return image, label
 
-
+#Make the model robust against wrongly aligned images, that may be uploaded by users. 
 def augment(image, label):
     image = tf.image.random_flip_left_right(image)
-    image = tf.image.random_flip_up_down(image)
     image = tf.image.rot90(image, k=1)
     image = tf.image.rot90(image, k=3)
     image = tf.image.random_brightness(image, max_delta=0.5)
